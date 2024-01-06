@@ -7,8 +7,8 @@ import {
     Contract as ZkSyncContract,
     Provider as ZkSyncProvider,
     utils as ZkSyncUtils,
-    Web3Provider as ZkSyncBrowserProvider
-} from "zksync-web3";
+    BrowserProvider as ZkSyncBrowserProvider
+} from "zksync-ethers";
 import {ethers} from "ethers";
 import greeterContractJson from "./artifacts/Greeter.json";
 import erc20ContractJson from "./artifacts/MyERC20.json";
@@ -70,14 +70,14 @@ export default function Home() {
         // @ts-ignore
         const userZkStackProvider = new ZkSyncBrowserProvider(window.ethereum);
         await userZkStackProvider.send("eth_requestAccounts", []);
-        const userZkStackSigner = userZkStackProvider.getSigner();
+        const userZkStackSigner = await userZkStackProvider.getSigner();
         // Read balance of user
         const userAddress = await userZkStackSigner.getAddress();
         const balanceInLowerUnit = await serverZkStackProvider.getBalance(
             userAddress,
             "committed",
             newSelectedTokenDetails.address);
-        const balanceInCurrency = ethers.utils.formatUnits(balanceInLowerUnit, newSelectedTokenDetails.decimals);
+        const balanceInCurrency = ethers.formatUnits(balanceInLowerUnit, newSelectedTokenDetails.decimals);
         console.log(balanceInCurrency);
         setBalance(balanceInCurrency);
         // Read greeter contract
@@ -104,7 +104,7 @@ export default function Home() {
                     userAddress,
                     testnetPaymaster,
                 );
-                const paymasterAllowance = ethers.utils.formatUnits(paymasterAllowanceBN, newSelectedTokenDetails.decimals);
+                const paymasterAllowance = ethers.formatUnits(paymasterAllowanceBN, newSelectedTokenDetails.decimals);
                 console.log("paymasterAllowance");
                 console.log(paymasterAllowance);
                 setPaymasterAllowance(paymasterAllowance);
@@ -234,11 +234,11 @@ export default function Home() {
     // TODO: Remove
     const handleChangeAllowanceButton = async (newInput: string | null) => {
         if (newInput) {
-            const inputValue = ethers.BigNumber.from(newInput).mul(ethers.BigNumber.from("1000000000000000000"));
+            const inputValue = BigInt(newInput) * BigInt("1000000000000000000");
             const serverZkStackProvider = new ZkSyncProvider(process.env.NEXT_PUBLIC_BLOCKCHAIN_URL);
             // @ts-ignore
             const userZkStackProvider = new ZkSyncBrowserProvider(window.ethereum);
-            const userZkStackSigner = userZkStackProvider.getSigner();
+            const userZkStackSigner = await userZkStackProvider.getSigner();
             const tokenContract = new ZkSyncContract(
                 selectedToken.address,
                 erc20ContractJson.abi,
@@ -312,21 +312,30 @@ export default function Home() {
     const handleSubmitMessageButton = async (message: string | null) => {
         if (message) {
             const serverZkStackProvider = new ZkSyncProvider(process.env.NEXT_PUBLIC_BLOCKCHAIN_URL);
+            // const ethProvider = ethers.getDefaultProvider("sepolia");
             // @ts-ignore
             const userZkStackProvider = new ZkSyncBrowserProvider(window.ethereum);
-            const userZkStackSigner = userZkStackProvider.getSigner();
+            const userZkStackSigner = await userZkStackProvider.getSigner();
             const greeterContract = new ZkSyncContract(
                 process.env.NEXT_PUBLIC_GREETER_CONTRACT_ADDRESS ? process.env.NEXT_PUBLIC_GREETER_CONTRACT_ADDRESS : "",
                 greeterContractJson.abi,
                 userZkStackSigner
             );
             console.log("Greeter contract address");
-            console.log(greeterContract.address);
+            console.log(await greeterContract.getAddress());
             console.log(process.env.NEXT_PUBLIC_GREETER_CONTRACT_ADDRESS);
             console.log("Message");
             console.log(message);
-            // Configure overrides
-            let overrides = {};
+            // If the user is paying for gas in Ether
+            if (selectedToken.name == "Ether") {
+                // Execute transaction
+                const transaction = await greeterContract.setGreeting(message);
+                console.log(transaction.hash);
+                setIsLoadingMessage("Waiting for transaction to be processed...");
+                await transaction.wait();
+                await readOnChainData(selectedToken);
+            }
+            // If the user is paying for gas in ERC20 token, via the Paymaster
             if (selectedToken.name != "Ether") {
                 console.log("Trying to send transaction via paymaster...");
                 const testnetPaymaster =
@@ -334,13 +343,13 @@ export default function Home() {
                 console.log("testnetPaymaster");
                 console.log(testnetPaymaster);
                 if (testnetPaymaster) {
-                    const gasPrice = await userZkStackProvider.getGasPrice();
+                    const gasPrice = await serverZkStackProvider.getGasPrice();
                     console.log("gasPrice");
                     console.log(gasPrice);
                     // estimate gasLimit via paymaster
                     const initialPaymasterInput = {
                         type: "ApprovalBased",
-                        minimalAllowance: ethers.BigNumber.from("1"),
+                        minimalAllowance: BigInt("1"),
                         token: selectedToken.address,
                         innerInput: new Uint8Array(),
                     };
@@ -351,7 +360,7 @@ export default function Home() {
                         testnetPaymaster,
                         {
                             type: "ApprovalBased",
-                            minimalAllowance: ethers.BigNumber.from("1"),
+                            minimalAllowance: BigInt("1"),
                             token: selectedToken.address,
                             innerInput: new Uint8Array(),
                         }
@@ -359,7 +368,7 @@ export default function Home() {
                     console.log("paramsForFeeEstimation");
                     console.log(paramsForFeeEstimation);
                     // estimate gasLimit via paymaster
-                    const gasLimit = await greeterContract.estimateGas.setGreeting({
+                    const gasLimit = await greeterContract.setGreeting.estimateGas({
                         message,
                         customData: {
                             gasPerPubdata: ZkSyncUtils.DEFAULT_GAS_PER_PUBDATA_LIMIT,
@@ -370,7 +379,7 @@ export default function Home() {
                     console.log(ZkSyncUtils.DEFAULT_GAS_PER_PUBDATA_LIMIT);
                     console.log("gasLimit");
                     console.log(gasLimit);
-                    const fee = gasPrice.mul(gasLimit.toString());
+                    const fee = gasPrice * BigInt(gasLimit);
                     console.log("Estimated fee");
                     console.log(fee);
                     const newPaymasterInput = {
@@ -391,7 +400,7 @@ export default function Home() {
                     });
                     console.log("paymasterParams");
                     console.log(paymasterParams);
-                    overrides = {
+                    const overrides = {
                         maxFeePerGas: gasPrice,
                         maxPriorityFeePerGas: BigInt(0),
                         gasLimit: gasLimit,
@@ -400,17 +409,18 @@ export default function Home() {
                             paymasterParams,
                         },
                     };
+                    // Execute transaction
+                    console.log("Overrides");
+                    console.log(overrides);
+                    const transaction = await greeterContract.setGreeting(message, overrides);
+                    console.log(transaction.hash);
+                    setIsLoadingMessage("Waiting for transaction to be processed...");
+                    await transaction.wait();
+                    await readOnChainData(selectedToken);
                 }
             }
 
-            // Execute transaction
-            console.log("Overrides");
-            console.log(overrides);
-            const transaction = await greeterContract.setGreeting(message, overrides);
-            console.log(transaction.hash);
-            setIsLoadingMessage("Waiting for transaction to be processed...");
-            await transaction.wait();
-            await readOnChainData(selectedToken);
+
         }
     };
 
