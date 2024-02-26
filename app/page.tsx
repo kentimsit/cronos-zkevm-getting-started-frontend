@@ -87,6 +87,9 @@ export default function Home() {
      */
     const readOnChainData = async (newSelectedTokenDetails: TokenDetails) => {
         setIsLoadingMessage("Loading...");
+        await window.ethereum
+            ?.request({ method: "eth_requestAccounts" })
+            .catch((e: unknown) => console.error(e));
         const serverZkStackProvider = new zkProvider(
             process.env.NEXT_PUBLIC_BLOCKCHAIN_URL
         );
@@ -433,8 +436,13 @@ export default function Home() {
             );
             // const ethProvider = ethers.getDefaultProvider("sepolia");
             // @ts-ignore
-            const userZkStackProvider = new ZkBrowserProvider(window.ethereum);
-            const userZkStackSigner = await userZkStackProvider.getSigner();
+            // const userZkStackProvider = new ZkBrowserProvider(window.ethereum);
+            // const userZkStackSigner = await userZkStackProvider.getSigner();
+            const userZkStackSigner = await new ZkBrowserProvider(
+                window.ethereum
+            ).getSigner();
+            console.log("User signer:");
+            console.log(userZkStackSigner);
             console.log("User address:", await userZkStackSigner.getAddress());
             const greeterContract = new ZkContract(
                 process.env.NEXT_PUBLIC_GREETER_CONTRACT_ADDRESS
@@ -470,6 +478,8 @@ export default function Home() {
                     await serverZkStackProvider.getTestnetPaymasterAddress();
                 console.log("testnetPaymasterAddress:");
                 console.log(testnetPaymasterAddress);
+                console.log("Selected token:");
+                console.log(selectedToken.address);
                 if (testnetPaymasterAddress) {
                     const gasPrice = await serverZkStackProvider.getGasPrice();
                     console.log("gasPrice:");
@@ -492,9 +502,10 @@ export default function Home() {
                         token: selectedToken.address,
                         innerInput: new Uint8Array(),
                     });
+                    console.log("Message:");
+                    console.log(message);
                     const gasLimit =
-                        await greeterContract.setGreeting.estimateGas({
-                            message,
+                        await greeterContract.setGreeting.estimateGas(message, {
                             customData: {
                                 gasPerPubdata:
                                     ZkUtils.DEFAULT_GAS_PER_PUBDATA_LIMIT,
@@ -505,7 +516,7 @@ export default function Home() {
                     console.log(ZkUtils.DEFAULT_GAS_PER_PUBDATA_LIMIT);
                     console.log("gasLimit:");
                     console.log(gasLimit);
-                    const fee = gasPrice * BigInt(gasLimit);
+                    const fee = gasPrice * gasLimit;
                     console.log("Estimated fee:");
                     console.log(fee);
                     // Create transaction
