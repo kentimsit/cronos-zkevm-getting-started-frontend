@@ -1,5 +1,3 @@
-// noinspection DuplicatedCode
-
 "use client";
 import React, { ChangeEvent, useEffect, useState } from "react";
 import {
@@ -22,15 +20,17 @@ import { ethers } from "ethers";
 import greeterContractJson from "./artifacts/Greeter.json";
 import erc20ContractJson from "./artifacts/MyERC20.json";
 
+declare global {
+    interface Window {
+        ethereum?: import("ethers").Eip1193Provider;
+    }
+}
 interface TokenDetails {
     address: string;
     decimals: number;
     name: string;
     symbol: string;
 }
-
-// zkSync TEST token (for information only)
-// https://sepolia.explorer.zksync.io/address/0x7E2026D8f35872923F5459BbEDDB809F6aCEfEB3#contract
 
 const allowedTokens: TokenDetails[] = [
     {
@@ -49,8 +49,6 @@ const allowedTokens: TokenDetails[] = [
     },
 ];
 
-console.log("Allowed tokens:");
-console.log(allowedTokens);
 const defaultToken = allowedTokens[1];
 
 export default function Home() {
@@ -76,8 +74,6 @@ export default function Home() {
             (t) => t.name == newTokenName
         )[0];
         setSelectedToken(newSelectedTokenDetails);
-        console.log("Selected token details:");
-        console.log(newSelectedTokenDetails);
         readOnChainData(newSelectedTokenDetails);
     };
 
@@ -87,6 +83,7 @@ export default function Home() {
      */
     const readOnChainData = async (newSelectedTokenDetails: TokenDetails) => {
         setIsLoadingMessage("Loading...");
+        // Initialize MetaMask, this must be done before creating any signer.
         await window.ethereum
             ?.request({ method: "eth_requestAccounts" })
             .catch((e: unknown) => console.error(e));
@@ -108,7 +105,6 @@ export default function Home() {
             balanceInLowerUnit,
             newSelectedTokenDetails.decimals
         );
-        console.log("User balance", balanceInCurrency);
         setBalance(balanceInCurrency);
         // Read greeter contract
         const greeterContract = new ZkContract(
@@ -119,14 +115,11 @@ export default function Home() {
             serverZkStackProvider
         );
         const message: string = await greeterContract.greet();
-        console.log("Message found", message);
         setMessage(message);
         // Read paymaster allowance
         const testnetPaymasterAddress =
             await serverZkStackProvider.getTestnetPaymasterAddress();
         if (newSelectedTokenDetails.name != "Ether") {
-            console.log("testnetPaymasterAddress:");
-            console.log(testnetPaymasterAddress);
             if (testnetPaymasterAddress) {
                 const tokenContract = new ZkContract(
                     newSelectedTokenDetails.address,
@@ -141,7 +134,6 @@ export default function Home() {
                     paymasterAllowanceBN,
                     newSelectedTokenDetails.decimals
                 );
-                console.log("paymasterAllowance:", paymasterAllowance);
                 setPaymasterAllowance(paymasterAllowance);
             }
         }
@@ -369,7 +361,8 @@ export default function Home() {
                 <Box>
                     <Box marginTop="10px" marginBottom="10px">
                         <Text as="b" fontSize="xl" color="black">
-                            Change Paymaster allowance
+                            Change Paymaster allowance (does not seem to be
+                            required for the Paymaster to work)
                         </Text>
                     </Box>
                     <Box marginTop="12px" width="100%">
@@ -434,131 +427,26 @@ export default function Home() {
             const serverZkStackProvider = new zkProvider(
                 process.env.NEXT_PUBLIC_BLOCKCHAIN_URL
             );
-            // const ethProvider = ethers.getDefaultProvider("sepolia");
-            // @ts-ignore
-            // const userZkStackProvider = new ZkBrowserProvider(window.ethereum);
-            // const userZkStackSigner = await userZkStackProvider.getSigner();
-            const userZkStackSigner = await new ZkBrowserProvider(
-                window.ethereum
-            ).getSigner();
-            console.log("User signer:");
-            console.log(userZkStackSigner);
-            console.log("User address:", await userZkStackSigner.getAddress());
-            const greeterContract = new ZkContract(
-                process.env.NEXT_PUBLIC_GREETER_CONTRACT_ADDRESS
-                    ? process.env.NEXT_PUBLIC_GREETER_CONTRACT_ADDRESS
-                    : "",
-                greeterContractJson.abi,
-                userZkStackSigner
-            );
-            console.log("Greeter contract address");
-            console.log(await greeterContract.getAddress());
-            console.log(process.env.NEXT_PUBLIC_GREETER_CONTRACT_ADDRESS);
-            console.log("Message");
-            console.log(message);
-            // If the user is paying for gas in Ether
-            // This works
-            if (selectedToken.name == "Ether") {
-                // Execute transaction
-                const transaction = await greeterContract.setGreeting(message);
-                console.log("Transaction hash:", transaction.hash);
-                setIsLoadingMessage(
-                    "Waiting for transaction to be processed..."
+            if (window.ethereum) {
+                const userZkStackProvider = new ZkBrowserProvider(
+                    window.ethereum
                 );
-                await transaction.wait();
-                await readOnChainData(selectedToken);
-            }
-            // If the user is paying for gas in ERC20 token, via the Paymaster
-            // This is based on : https://docs.zksync.io/build/tutorials/dapp-development/frontend-quickstart-paymaster.html#pay-fees-with-erc20-tokens
-            // This does not work currently, it fails at
-            // const transaction = await greeterContract.setGreeting(message, overrides);
-            if (selectedToken.name != "Ether") {
-                console.log("Trying to send transaction via paymaster...");
-                const testnetPaymasterAddress =
-                    await serverZkStackProvider.getTestnetPaymasterAddress();
-                console.log("testnetPaymasterAddress:");
-                console.log(testnetPaymasterAddress);
-                console.log("Selected token:");
-                console.log(selectedToken.address);
-                if (testnetPaymasterAddress) {
-                    const gasPrice = await serverZkStackProvider.getGasPrice();
-                    console.log("gasPrice:");
-                    console.log(gasPrice);
-                    // Estimate gasLimit via paymaster
-                    const paramsForFeeEstimation = ZkUtils.getPaymasterParams(
-                        testnetPaymasterAddress,
-                        {
-                            type: "ApprovalBased",
-                            minimalAllowance: BigInt("1"),
-                            token: selectedToken.address,
-                            innerInput: new Uint8Array(),
-                        }
-                    );
-                    console.log("paramsForFeeEstimation:");
-                    console.log(paramsForFeeEstimation);
-                    console.log({
-                        type: "ApprovalBased",
-                        minimalAllowance: BigInt("1"),
-                        token: selectedToken.address,
-                        innerInput: new Uint8Array(),
-                    });
-                    console.log("Message:");
-                    console.log(message);
-                    const gasLimit =
-                        await greeterContract.setGreeting.estimateGas(message, {
-                            customData: {
-                                gasPerPubdata:
-                                    ZkUtils.DEFAULT_GAS_PER_PUBDATA_LIMIT,
-                                paymasterParams: paramsForFeeEstimation,
-                            },
-                        });
-                    console.log("Default gas per pubdata:");
-                    console.log(ZkUtils.DEFAULT_GAS_PER_PUBDATA_LIMIT);
-                    console.log("gasLimit:");
-                    console.log(gasLimit);
-                    const fee = gasPrice * gasLimit;
-                    console.log("Estimated fee:");
-                    console.log(fee);
-                    // Create transaction
-                    const paymasterParams = ZkUtils.getPaymasterParams(
-                        testnetPaymasterAddress,
-                        {
-                            type: "ApprovalBased",
-                            token: selectedToken.address,
-                            minimalAllowance: fee,
-                            // empty bytes as testnet paymaster does not use innerInput
-                            innerInput: new Uint8Array(),
-                        }
-                    );
-                    console.log("paymasterParams:");
-                    console.log(paymasterParams);
-                    console.log({
-                        type: "ApprovalBased",
-                        token: selectedToken.address,
-                        minimalAllowance: fee,
-                        innerInput: new Uint8Array(),
-                    });
-                    const overrides = {
-                        maxFeePerGas: gasPrice,
-                        maxPriorityFeePerGas: BigInt("1"),
-                        gasLimit: gasLimit,
-                        customData: {
-                            gasPerPubdata:
-                                ZkUtils.DEFAULT_GAS_PER_PUBDATA_LIMIT,
-                            paymasterParams,
-                        },
-                    };
+
+                const userZkStackSigner = await userZkStackProvider.getSigner();
+                const greeterContract = new ZkContract(
+                    process.env.NEXT_PUBLIC_GREETER_CONTRACT_ADDRESS
+                        ? process.env.NEXT_PUBLIC_GREETER_CONTRACT_ADDRESS
+                        : "",
+                    greeterContractJson.abi,
+                    userZkStackSigner
+                );
+
+                // If the user is paying for gas in Ether
+
+                if (selectedToken.name == "Ether") {
                     // Execute transaction
-                    console.log("Overrides:");
-                    console.log(overrides);
-                    // ERROR IS HERE !!!
-                    /*
-                     * This fails at the following line of the sendTransaction function:
-                     * const from = await ethers_1.ethers.resolveAddress(transaction.from);
-                     */
                     const transaction = await greeterContract.setGreeting(
-                        message,
-                        overrides
+                        message
                     );
                     console.log("Transaction hash:", transaction.hash);
                     setIsLoadingMessage(
@@ -566,6 +454,71 @@ export default function Home() {
                     );
                     await transaction.wait();
                     await readOnChainData(selectedToken);
+                }
+                // If the user is paying for gas in ERC20 token, via the Paymaster
+                // This is based on : https://docs.zksync.io/build/tutorials/dapp-development/frontend-quickstart-paymaster.html#pay-fees-with-erc20-tokens
+                if (selectedToken.name != "Ether") {
+                    const testnetPaymasterAddress =
+                        await serverZkStackProvider.getTestnetPaymasterAddress();
+                    if (testnetPaymasterAddress) {
+                        const gasPrice =
+                            await serverZkStackProvider.getGasPrice();
+                        // Estimate gasLimit via paymaster
+                        const paramsForFeeEstimation =
+                            ZkUtils.getPaymasterParams(
+                                testnetPaymasterAddress,
+                                {
+                                    type: "ApprovalBased",
+                                    minimalAllowance: BigInt("1"),
+                                    token: selectedToken.address,
+                                    innerInput: new Uint8Array(),
+                                }
+                            );
+                        const gasLimit =
+                            await greeterContract.setGreeting.estimateGas(
+                                message,
+                                {
+                                    customData: {
+                                        gasPerPubdata:
+                                            ZkUtils.DEFAULT_GAS_PER_PUBDATA_LIMIT,
+                                        paymasterParams: paramsForFeeEstimation,
+                                    },
+                                }
+                            );
+                        const fee = gasPrice * gasLimit;
+                        // Create transaction
+                        const paymasterParams = ZkUtils.getPaymasterParams(
+                            testnetPaymasterAddress,
+                            {
+                                type: "ApprovalBased",
+                                token: selectedToken.address,
+                                minimalAllowance: fee,
+                                // empty bytes as testnet paymaster does not use innerInput
+                                innerInput: new Uint8Array(),
+                            }
+                        );
+                        const overrides = {
+                            maxFeePerGas: gasPrice,
+                            maxPriorityFeePerGas: BigInt("1"),
+                            gasLimit: gasLimit,
+                            customData: {
+                                gasPerPubdata:
+                                    ZkUtils.DEFAULT_GAS_PER_PUBDATA_LIMIT,
+                                paymasterParams,
+                            },
+                        };
+                        // Execute transaction
+                        const transaction = await greeterContract.setGreeting(
+                            message,
+                            overrides
+                        );
+                        console.log("Transaction hash:", transaction.hash);
+                        setIsLoadingMessage(
+                            "Waiting for transaction to be processed..."
+                        );
+                        await transaction.wait();
+                        await readOnChainData(selectedToken);
+                    }
                 }
             }
         }
