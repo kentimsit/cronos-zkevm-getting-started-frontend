@@ -440,9 +440,7 @@ export default function Home() {
                     greeterContractJson.abi,
                     userZkStackSigner
                 );
-
                 // If the user is paying for gas in Ether
-
                 if (selectedToken.name == "Ether") {
                     // Execute transaction
                     const transaction = await greeterContract.setGreeting(
@@ -576,7 +574,8 @@ export default function Home() {
                     the Greeter smart contract.
                 </Text>
                 <Text fontSize="l" color="black">
-                    Unlock MetaMask, and connect to the zkStack Sepolia Testnet.
+                    Unlock MetaMask, and connect to the Cronos zkEVM Sepolia
+                    Testnet.
                 </Text>
             </Box>
             <Loading />
